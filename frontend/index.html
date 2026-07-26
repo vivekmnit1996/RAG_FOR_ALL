@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Universal RAG</title>
+
+<style>
+:root {
+  --bg: #0b0e14;
+  --panel: rgba(255,255,255,0.06);
+  --border: rgba(255,255,255,0.08);
+  --accent: #10a37f;
+  --accent-soft: rgba(16,163,127,0.15);
+  --text: #eaeaea;
+  --muted: #9aa4af;
+  --user: #4ea1ff;
+  --bot: #10a37f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(1200px 600px at top, #101726, var(--bg));
+  color: var(--text);
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+}
+
+.container {
+  max-width: 1000px;
+  margin: auto;
+  padding: 28px 20px 40px;
+}
+
+h1 {
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  margin-bottom: 28px;
+}
+
+/* Panels */
+.panel {
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 18px;
+}
+
+/* Sources */
+.sources-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.sources-header span {
+  font-weight: 500;
+}
+
+.source {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 6px;
+  border-bottom: 1px dashed var(--border);
+  font-size: 14px;
+}
+
+.source:last-child { border-bottom: none; }
+
+/* Chat */
+.chat {
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.msg {
+  max-width: 80%;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  line-height: 1.4;
+  font-size: 15px;
+}
+
+.user {
+  background: rgba(78,161,255,0.15);
+  border: 1px solid rgba(78,161,255,0.3);
+  color: var(--user);
+  margin-left: auto;
+  border-bottom-right-radius: 4px;
+}
+
+.bot {
+  background: var(--accent-soft);
+  border: 1px solid rgba(16,163,127,0.35);
+  color: var(--bot);
+  margin-right: auto;
+  border-bottom-left-radius: 4px;
+}
+
+/* Inputs */
+.input-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+input[type="text"],
+input[type="file"] {
+  flex: 1;
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  border-radius: 10px;
+  outline: none;
+}
+
+input::placeholder { color: var(--muted); }
+
+/* Buttons */
+button {
+  background: linear-gradient(135deg, #10a37f, #1ad1a5);
+  color: #062019;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(16,163,127,0.35);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+button.remove {
+  background: rgba(255,70,70,0.15);
+  color: #ff6b6b;
+  padding: 6px 10px;
+}
+
+button.remove:hover {
+  box-shadow: 0 0 0 1px rgba(255,70,70,0.35);
+}
+
+/* Footer ask bar */
+.ask-row {
+  display: flex;
+  gap: 10px;
+}
+
+.ask-row input {
+  flex: 1;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+  <h1>🤖 Universal RAG</h1>
+
+  <div class="panel" id="sources">
+    <div class="sources-header">
+      <span>📂 Sources</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="input-row">
+      <input id="textInput" type="text" placeholder="Paste URL or raw text…" />
+      <input type="file" id="fileInput" />
+      <button onclick="addSource()">Add Source</button>
+    </div>
+  </div>
+
+  <div class="panel chat" id="chat"></div>
+
+  <div class="panel">
+    <div class="ask-row">
+      <input id="question" type="text" placeholder="Ask something…" disabled />
+      <button id="askBtn" onclick="ask()" disabled>Ask</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let sources = {};
+
+function renderSources(){
+  const div = document.getElementById("sources");
+  div.innerHTML = `
+    <div class="sources-header">
+      <span>📂 Sources</span>
+    </div>
+  `;
+  Object.entries(sources).forEach(([id,name])=>{
+    div.innerHTML += `
+      <div class="source">
+        <span>${name}</span>
+        <button class="remove" onclick="removeSource('${id}')">✖</button>
+      </div>`;
+  });
+
+  document.getElementById("askBtn").disabled = Object.keys(sources).length===0;
+  document.getElementById("question").disabled = Object.keys(sources).length===0;
+}
+
+async function addSource(){
+  const text = document.getElementById("textInput").value;
+  const file = document.getElementById("fileInput").files[0];
+  let res;
+
+  if(file){
+    const fd = new FormData();
+    fd.append("file", file);
+    res = await fetch("/ingest-file",{method:"POST",body:fd});
+    document.getElementById("fileInput").value="";
+  } else if(text){
+    res = await fetch("/ingest-text?source="+encodeURIComponent(text),{method:"POST"});
+  } else return;
+
+  const data = await res.json();
+  sources[data.id] = data.name;
+  document.getElementById("textInput").value="";
+  renderSources();
+}
+
+async function removeSource(id){
+  await fetch("/remove-source",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({source_id:id})
+  });
+  delete sources[id];
+  renderSources();
+}
+
+async function ask(){
+  const q = document.getElementById("question").value;
+  document.getElementById("question").value="";
+  document.getElementById("chat").innerHTML += `<div class="msg user">🧑 ${q}</div>`;
+
+  const res = await fetch("/chat",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({question:q})
+  });
+
+  const data = await res.json();
+  document.getElementById("chat").innerHTML += `<div class="msg bot">🤖 ${data.answer}</div>`;
+}
+</script>
+</body>
+</html>
